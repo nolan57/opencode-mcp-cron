@@ -1,0 +1,21 @@
+{
+  "name": "@lpcw/mcp-cron",
+  "version": "1.0.0",
+  "description": "MCP Cron Server - 定时任务调度服务",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "croner": "^10.0.1",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}
