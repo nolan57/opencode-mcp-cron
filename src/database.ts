@@ -380,7 +380,7 @@ migrate(): void {
   /**
    * 准备语句
    */
-  prepare<T = unknown>(sql: string): Database.Statement<T> {
+  prepare<T extends unknown[] | {} = unknown[]>(sql: string): Database.Statement<T> {
     return this.db.prepare<T>(sql);
   }
 

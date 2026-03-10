@@ -92,7 +92,7 @@ export interface ExecutionUpdate {
   errorMessage?: string;
   errorStack?: string;
   contextJson?: string;
-  resultJson?: string;
+  resultJson?: string | null;
   durationMs?: number;
   retryCount?: number;
 }
@@ -419,38 +419,38 @@ export class Repository {
   private logBuffer: LogBuffer;
 
   // 预处理语句 - Jobs
-  private insertJobStmt: Database.Statement;
-  private updateJobStmt: Database.Statement;
-  private getJobByIdStmt: Database.Statement;
-  private listJobsStmt: Database.Statement;
-  private listEnabledJobsStmt: Database.Statement;
-  private deleteJobStmt: Database.Statement;
-  private updateJobNextRunStmt: Database.Statement;
+  private insertJobStmt!: Database.Statement;
+  private updateJobStmt!: Database.Statement;
+  private getJobByIdStmt!: Database.Statement;
+  private listJobsStmt!: Database.Statement;
+  private listEnabledJobsStmt!: Database.Statement;
+  private deleteJobStmt!: Database.Statement;
+  private updateJobNextRunStmt!: Database.Statement;
 
   // 预处理语句 - Executions
-  private insertExecutionStmt: Database.Statement;
-  private getExecutionByIdStmt: Database.Statement;
-  private updateExecutionStatusStmt: Database.Statement;
-  private updateExecutionHeartbeatStmt: Database.Statement;
-  private listExecutionsByJobStmt: Database.Statement;
-  private getRunningExecutionsStmt: Database.Statement;
-  private getNextDueExecutionStmt: Database.Statement;
-  private getRecentExecutionsStmt: Database.Statement;
-  private listExecutionsStmt: Database.Statement;
-  private getTotalExecutionsStmt: Database.Statement;
+  private insertExecutionStmt!: Database.Statement;
+  private getExecutionByIdStmt!: Database.Statement;
+  private updateExecutionStatusStmt!: Database.Statement;
+  private updateExecutionHeartbeatStmt!: Database.Statement;
+  private listExecutionsByJobStmt!: Database.Statement;
+  private getRunningExecutionsStmt!: Database.Statement;
+  private getNextDueExecutionStmt!: Database.Statement;
+  private getRecentExecutionsStmt!: Database.Statement;
+  private listExecutionsStmt!: Database.Statement;
+  private getTotalExecutionsStmt!: Database.Statement;
 
   // 预处理语句 - Logs
-  private getLogsByExecutionStmt: Database.Statement;
-  private getLogCountStmt: Database.Statement;
+  private getLogsByExecutionStmt!: Database.Statement;
+  private getLogCountStmt!: Database.Statement;
 
   // 预处理语句 - Approvals
-  private insertApprovalStmt: Database.Statement;
-  private getApprovalByExecutionStmt: Database.Statement;
-  private updateApprovalStatusStmt: Database.Statement;
-  private listPendingApprovalsStmt: Database.Statement;
+  private insertApprovalStmt!: Database.Statement;
+  private getApprovalByExecutionStmt!: Database.Statement;
+  private updateApprovalStatusStmt!: Database.Statement;
+  private listPendingApprovalsStmt!: Database.Statement;
 
   // 预处理语句 - Stats
-  private getStatsStmt: Database.Statement;
+  private getStatsStmt!: Database.Statement;
 
   constructor() {
     this.db = getDatabase().getDatabase();

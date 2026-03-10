@@ -272,7 +272,7 @@ export type CronJobCreate = Omit<CronJob, 'id' | 'createdAtMs' | 'updatedAtMs' |
 /**
  * 更新任务参数
  */
-export type CronJobPatch = Partial<Omit<CronJob, 'id' | 'createdAtMs' | 'state'>>;
+export type CronJobPatch = Partial<Omit<CronJob, 'id' | 'createdAtMs'>>;
 
 /**
  * @deprecated 使用 Repository 替代
@@ -290,8 +290,8 @@ export type CronStore = {
  * 执行记录
  */
 export type Execution = {
-  id: ExecutionId;
-  jobId: JobId;
+  id: string;
+  jobId: string;
   status: ExecutionStatus;
   startedAt: number | null;
   finishedAt: number | null;
@@ -300,7 +300,7 @@ export type Execution = {
   errorStack: string | null;
   contextJson: string | null;
   resultJson: string | null;
-  traceId: TraceId | null;
+  traceId: string | null;
   durationMs: number | null;
   retryCount: number;
   createdAt: number;
