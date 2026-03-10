@@ -10,7 +10,7 @@
  *
  * @module executor
  */
-import type { CronJob, CronJobResult, ExecutionResult } from './types.js';
+import type { CronJob, CronJobResult, ExecutionResult } from "./types.js";
 /**
  * 执行任务（新版 - 使用 Execution 记录）
  *

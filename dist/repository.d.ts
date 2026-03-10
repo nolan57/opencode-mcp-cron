@@ -16,8 +16,8 @@
  *
  * @module repository
  */
-import { type ExecutionStatus, type LogLevel, type ApprovalStatus } from './database.js';
-import type { CronJob, CronJobCreate, CronJobPatch } from './types.js';
+import { type ExecutionStatus, type LogLevel, type ApprovalStatus } from "./database.js";
+import type { CronJob, CronJobCreate, CronJobPatch } from "./types.js";
 /**
  * 任务配置（存储在 config_json 字段）
  */
@@ -25,7 +25,7 @@ export interface JobConfig {
     requiresApproval?: boolean;
     contextSchema?: Record<string, unknown>;
     maxDurationMs?: number;
-    timeoutBehavior?: 'fail' | 'pause' | 'ignore';
+    timeoutBehavior?: "fail" | "pause" | "ignore";
     notificationChannels?: string[];
     tags?: string[];
 }

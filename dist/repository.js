@@ -16,7 +16,7 @@
  *
  * @module repository
  */
-import { getDatabase, generateId, generateTraceId, } from './database.js';
+import { getDatabase, generateId, generateTraceId, } from "./database.js";
 const DEFAULT_LOG_BUFFER_CONFIG = {
     maxBufferSize: 1000, // 最大缓冲 1000 条
     flushIntervalMs: 500, // 500ms 刷新一次
@@ -80,7 +80,7 @@ class LogBuffer {
         }
         // 防止缓冲区过大（内存保护）
         if (this.buffer.length >= this.config.maxBufferSize) {
-            console.warn('[LogBuffer] Buffer overflow, forcing flush');
+            console.warn("[LogBuffer] Buffer overflow, forcing flush");
             this.flushSync();
         }
     }
@@ -173,7 +173,7 @@ class LogBuffer {
                 insertMany(batch);
             }
             catch (error) {
-                console.error('[LogBuffer] Batch write failed:', error);
+                console.error("[LogBuffer] Batch write failed:", error);
                 // 记录失败的日志数量
                 console.error(`[LogBuffer] Lost ${batch.length} log entries`);
             }
@@ -380,10 +380,9 @@ export class Repository {
         (SELECT COUNT(*) FROM executions WHERE status = 'running') as running_executions,
         (SELECT COUNT(*) FROM approvals WHERE status = 'pending') as pending_approvals,
         (SELECT AVG(duration_ms) FROM executions WHERE status = 'success' AND duration_ms IS NOT NULL) as avg_duration,
-        (SELECT CAST(
-          (SELECT COUNT(*) FROM executions WHERE status = 'failed') AS FLOAT
-        / NULLIF((SELECT COUNT(*) FROM executions WHERE status IN ('success', 'failed')), 0)
-        * 100 AS INTEGER)) as error_rate
+        (SELECT 
+          (SELECT COUNT(*) FROM executions WHERE status = 'failed') * 100.0
+        / NULLIF((SELECT COUNT(*) FROM executions WHERE status IN ('success', 'failed')), 0)) as error_rate
     `);
     }
     // =========================================================================
@@ -394,7 +393,7 @@ export class Repository {
      */
     createJob(input) {
         const now = Date.now();
-        const id = generateId('job');
+        const id = generateId("job");
         const job = {
             id,
             name: input.name,
@@ -468,15 +467,17 @@ export class Repository {
     listJobs(includeInactive = false) {
         const rows = includeInactive
             ? this.listJobsStmt.all()
-            : this.db.prepare('SELECT * FROM jobs WHERE is_active = 1 ORDER BY created_at DESC').all();
-        return rows.map(row => this.rowToJob(row));
+            : this.db
+                .prepare("SELECT * FROM jobs WHERE is_active = 1 ORDER BY created_at DESC")
+                .all();
+        return rows.map((row) => this.rowToJob(row));
     }
     /**
      * 列出启用的任务
      */
     listEnabledJobs() {
         const rows = this.listEnabledJobsStmt.all();
-        return rows.map(row => this.rowToJob(row));
+        return rows.map((row) => this.rowToJob(row));
     }
     /**
      * 删除任务（软删除）
@@ -502,7 +503,9 @@ export class Repository {
             enabled: Boolean(row.enabled),
             schedule: JSON.parse(row.schedule_json),
             payload: JSON.parse(row.payload_json),
-            options: row.options_json ? JSON.parse(row.options_json) : undefined,
+            options: row.options_json
+                ? JSON.parse(row.options_json)
+                : undefined,
             createdAtMs: row.created_at,
             updatedAtMs: row.updated_at,
             state: {
@@ -518,7 +521,7 @@ export class Repository {
      */
     createExecution(input) {
         const now = Date.now();
-        const id = generateId('exec');
+        const id = generateId("exec");
         const traceId = input.traceId ?? generateTraceId();
         this.db.transaction(() => {
             this.insertExecutionStmt.run({
@@ -533,7 +536,7 @@ export class Repository {
         return {
             id,
             jobId: input.jobId,
-            status: 'pending',
+            status: "pending",
             startedAt: null,
             finishedAt: null,
             lastHeartbeat: null,
@@ -582,7 +585,8 @@ export class Repository {
      */
     transitionExecutionStatus(id, fromStatus, toStatus, additionalUpdate) {
         const now = Date.now();
-        const result = this.db.prepare(`
+        const result = this.db
+            .prepare(`
       UPDATE executions SET
         status = ?,
         started_at = COALESCE(?, started_at),
@@ -592,7 +596,8 @@ export class Repository {
         duration_ms = ?,
         updated_at = ?
       WHERE id = ? AND status = ?
-    `).run(toStatus, additionalUpdate?.startedAt ?? null, additionalUpdate?.finishedAt ?? null, additionalUpdate?.errorMessage ?? null, additionalUpdate?.resultJson ?? null, additionalUpdate?.durationMs ?? null, now, id, fromStatus);
+    `)
+            .run(toStatus, additionalUpdate?.startedAt ?? null, additionalUpdate?.finishedAt ?? null, additionalUpdate?.errorMessage ?? null, additionalUpdate?.resultJson ?? null, additionalUpdate?.durationMs ?? null, now, id, fromStatus);
         return result.changes > 0;
     }
     /**
@@ -608,14 +613,14 @@ export class Repository {
      */
     listExecutionsByJob(jobId, limit = 50) {
         const rows = this.listExecutionsByJobStmt.all(jobId, limit);
-        return rows.map(row => this.rowToExecution(row));
+        return rows.map((row) => this.rowToExecution(row));
     }
     /**
      * 获取正在运行的执行
      */
     getRunningExecutions() {
         const rows = this.getRunningExecutionsStmt.all();
-        return rows.map(row => this.rowToExecution(row));
+        return rows.map((row) => this.rowToExecution(row));
     }
     /**
      * 获取下一个待执行的任务
@@ -634,7 +639,7 @@ export class Repository {
      */
     getRecentExecutions(limit = 10) {
         const rows = this.getRecentExecutionsStmt.all(limit);
-        return rows.map(row => this.rowToExecution(row));
+        return rows.map((row) => this.rowToExecution(row));
     }
     /**
      * 分页查询所有执行记录
@@ -652,7 +657,7 @@ export class Repository {
         const total = totalRow.count;
         const hasMore = safeOffset + rows.length < total;
         return {
-            items: rows.map(row => this.rowToExecution(row)),
+            items: rows.map((row) => this.rowToExecution(row)),
             total,
             hasMore,
         };
@@ -669,12 +674,14 @@ export class Repository {
      */
     getStaleExecutions(timeoutMs = 300000) {
         const cutoff = Date.now() - timeoutMs;
-        const rows = this.db.prepare(`
+        const rows = this.db
+            .prepare(`
       SELECT * FROM executions 
       WHERE status = 'running' 
       AND (last_heartbeat IS NULL AND started_at < ? OR last_heartbeat < ?)
-    `).all(cutoff, cutoff);
-        return rows.map(row => this.rowToExecution(row));
+    `)
+            .all(cutoff, cutoff);
+        return rows.map((row) => this.rowToExecution(row));
     }
     /**
      * 将数据库行转换为 Execution 对象
@@ -727,7 +734,7 @@ export class Repository {
         const total = countRow.count;
         const rows = this.getLogsByExecutionStmt.all(executionId, limit, offset);
         return {
-            items: rows.map(row => ({
+            items: rows.map((row) => ({
                 id: row.id,
                 executionId: row.execution_id,
                 timestamp: row.timestamp,
@@ -761,7 +768,7 @@ export class Repository {
      */
     createApproval(input) {
         const now = Date.now();
-        const id = generateId('apr');
+        const id = generateId("apr");
         this.db.transaction(() => {
             this.insertApprovalStmt.run({
                 id,
@@ -775,7 +782,7 @@ export class Repository {
         return {
             id,
             executionId: input.executionId,
-            status: 'pending',
+            status: "pending",
             requestMessage: input.requestMessage ?? null,
             requestContextJson: input.requestContextJson ?? null,
             note: null,
@@ -799,12 +806,12 @@ export class Repository {
      */
     approveExecution(executionId, note, resolvedBy) {
         const approval = this.getApprovalByExecution(executionId);
-        if (!approval || approval.status !== 'pending')
+        if (!approval || approval.status !== "pending")
             return null;
         const now = Date.now();
         const updatedApproval = {
             ...approval,
-            status: 'approved',
+            status: "approved",
             note: note ?? null,
             resolvedBy: resolvedBy ?? null,
             resolvedAt: now,
@@ -813,16 +820,18 @@ export class Repository {
         this.db.transaction(() => {
             this.updateApprovalStatusStmt.run({
                 id: approval.id,
-                status: 'approved',
+                status: "approved",
                 note: note ?? null,
                 resolvedBy: resolvedBy ?? null,
                 resolvedAt: now,
                 updatedAt: now,
             });
             // 将执行状态从 waiting_for_approval 改为 pending（待恢复执行）
-            this.db.prepare(`
+            this.db
+                .prepare(`
         UPDATE executions SET status = 'pending', updated_at = ? WHERE id = ? AND status = 'waiting_for_approval'
-      `).run(now, executionId);
+      `)
+                .run(now, executionId);
         })();
         const execution = this.getExecution(executionId);
         if (!execution)
@@ -834,12 +843,12 @@ export class Repository {
      */
     rejectExecution(executionId, reason, resolvedBy) {
         const approval = this.getApprovalByExecution(executionId);
-        if (!approval || approval.status !== 'pending')
+        if (!approval || approval.status !== "pending")
             return null;
         const now = Date.now();
         const updatedApproval = {
             ...approval,
-            status: 'rejected',
+            status: "rejected",
             note: reason ?? null,
             resolvedBy: resolvedBy ?? null,
             resolvedAt: now,
@@ -848,16 +857,18 @@ export class Repository {
         this.db.transaction(() => {
             this.updateApprovalStatusStmt.run({
                 id: approval.id,
-                status: 'rejected',
+                status: "rejected",
                 note: reason ?? null,
                 resolvedBy: resolvedBy ?? null,
                 resolvedAt: now,
                 updatedAt: now,
             });
             // 将执行状态改为 failed
-            this.db.prepare(`
+            this.db
+                .prepare(`
         UPDATE executions SET status = 'failed', error_message = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = 'waiting_for_approval'
-      `).run(reason ?? 'Rejected by user', now, now, executionId);
+      `)
+                .run(reason ?? "Rejected by user", now, now, executionId);
         })();
         const execution = this.getExecution(executionId);
         if (!execution)
@@ -869,7 +880,7 @@ export class Repository {
      */
     listPendingApprovals() {
         const rows = this.listPendingApprovalsStmt.all();
-        return rows.map(row => ({
+        return rows.map((row) => ({
             ...this.rowToApproval(row),
             jobId: row.job_id,
             jobName: row.job_name,
@@ -917,9 +928,11 @@ export class Repository {
      * 获取下一个唤醒时间
      */
     getNextWakeTime() {
-        const row = this.db.prepare(`
+        const row = this.db
+            .prepare(`
       SELECT MIN(next_run_at) as next_wake FROM jobs WHERE enabled = 1 AND is_active = 1 AND next_run_at IS NOT NULL
-    `).get();
+    `)
+            .get();
         return row.next_wake;
     }
     /**

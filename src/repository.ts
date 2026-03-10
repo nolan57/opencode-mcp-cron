@@ -1,23 +1,23 @@
 /**
  * MCP Cron Server - 数据访问层
- * 
+ *
  * 基于 SQLite 的数据访问实现，包含：
  * - Job CRUD 操作
  * - Execution 状态管理
  * - 日志缓冲区 + 批量写入
  * - Approval 审批流程
- * 
+ *
  * ⚠️ 日志缓冲区设计：
  * better-sqlite3 是同步库，高频日志写入会阻塞事件循环。
  * 本模块实现内存缓冲区：
  * - 日志先 push 到队列
  * - 每 500ms 或攒够 50 条批量事务写入
  * - 任务结束时调用 flush() 强制刷新
- * 
+ *
  * @module repository
  */
 
-import type Database from 'better-sqlite3';
+import type Database from "better-sqlite3";
 import {
   getDatabase,
   generateId,
@@ -25,7 +25,7 @@ import {
   type ExecutionStatus,
   type LogLevel,
   type ApprovalStatus,
-} from './database.js';
+} from "./database.js";
 import type {
   CronJob,
   CronJobCreate,
@@ -33,7 +33,7 @@ import type {
   CronSchedule,
   CronPayload,
   CronJobOptions,
-} from './types.js';
+} from "./types.js";
 
 // ============================================================================
 // 类型定义
@@ -46,7 +46,7 @@ export interface JobConfig {
   requiresApproval?: boolean;
   contextSchema?: Record<string, unknown>;
   maxDurationMs?: number;
-  timeoutBehavior?: 'fail' | 'pause' | 'ignore';
+  timeoutBehavior?: "fail" | "pause" | "ignore";
   notificationChannels?: string[];
   tags?: string[];
 }
@@ -179,15 +179,15 @@ interface BufferedLog {
  * 日志缓冲区配置
  */
 interface LogBufferConfig {
-  maxBufferSize: number;      // 最大缓冲数量
-  flushIntervalMs: number;    // 刷新间隔
-  batchSize: number;          // 单次写入批次大小
+  maxBufferSize: number; // 最大缓冲数量
+  flushIntervalMs: number; // 刷新间隔
+  batchSize: number; // 单次写入批次大小
 }
 
 const DEFAULT_LOG_BUFFER_CONFIG: LogBufferConfig = {
-  maxBufferSize: 1000,        // 最大缓冲 1000 条
-  flushIntervalMs: 500,       // 500ms 刷新一次
-  batchSize: 50,              // 每批写入 50 条
+  maxBufferSize: 1000, // 最大缓冲 1000 条
+  flushIntervalMs: 500, // 500ms 刷新一次
+  batchSize: 50, // 每批写入 50 条
 };
 
 /**
@@ -210,13 +210,13 @@ class LogBuffer {
   constructor(db: Database.Database, config: Partial<LogBufferConfig> = {}) {
     this.db = db;
     this.config = { ...DEFAULT_LOG_BUFFER_CONFIG, ...config };
-    
+
     // 准备预处理语句
     this.insertLogStmt = this.db.prepare(`
       INSERT INTO logs (execution_id, timestamp, level, content, sequence_num, metadata_json)
       VALUES (@executionId, @timestamp, @level, @content, @sequenceNum, @metadataJson)
     `);
-    
+
     this.insertManyLogsStmt = this.db.prepare(`
       INSERT INTO logs (execution_id, timestamp, level, content, sequence_num, metadata_json)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -243,7 +243,7 @@ class LogBuffer {
     executionId: string,
     level: LogLevel,
     content: string,
-    metadataJson?: string
+    metadataJson?: string,
   ): void {
     const log: BufferedLog = {
       executionId,
@@ -263,7 +263,7 @@ class LogBuffer {
 
     // 防止缓冲区过大（内存保护）
     if (this.buffer.length >= this.config.maxBufferSize) {
-      console.warn('[LogBuffer] Buffer overflow, forcing flush');
+      console.warn("[LogBuffer] Buffer overflow, forcing flush");
       this.flushSync();
     }
   }
@@ -273,13 +273,13 @@ class LogBuffer {
    */
   private startFlushTimer(): void {
     if (this.flushTimer) return;
-    
+
     this.flushTimer = setInterval(() => {
       if (this.buffer.length > 0) {
         this.scheduleFlush();
       }
     }, this.config.flushIntervalMs);
-    
+
     // 不阻止进程退出
     if (this.flushTimer.unref) {
       this.flushTimer.unref();
@@ -301,7 +301,7 @@ class LogBuffer {
    */
   private scheduleFlush(): void {
     if (this.isFlushing) return;
-    
+
     // 使用 setImmediate 在下一个事件循环迭代中执行
     setImmediate(() => this.flushAsync());
   }
@@ -313,10 +313,10 @@ class LogBuffer {
     if (this.isFlushing) {
       return this.flushPromise ?? Promise.resolve();
     }
-    
+
     this.isFlushing = true;
     this.flushPromise = this.doFlush();
-    
+
     try {
       await this.flushPromise;
     } finally {
@@ -330,7 +330,7 @@ class LogBuffer {
    */
   flushSync(): void {
     if (this.buffer.length === 0) return;
-    
+
     const logs = this.buffer.splice(0, this.buffer.length);
     this.writeLogsInBatches(logs);
   }
@@ -340,10 +340,10 @@ class LogBuffer {
    */
   private async doFlush(): Promise<void> {
     if (this.buffer.length === 0) return;
-    
+
     // 取出所有待写日志
     const logs = this.buffer.splice(0, this.buffer.length);
-    
+
     // 批量写入
     this.writeLogsInBatches(logs);
   }
@@ -355,10 +355,10 @@ class LogBuffer {
     if (logs.length === 0) return;
 
     const batchSize = this.config.batchSize;
-    
+
     for (let i = 0; i < logs.length; i += batchSize) {
       const batch = logs.slice(i, i + batchSize);
-      
+
       try {
         const insertMany = this.db.transaction((items: BufferedLog[]) => {
           for (const log of items) {
@@ -368,14 +368,14 @@ class LogBuffer {
               log.level,
               log.content,
               log.sequenceNum,
-              log.metadataJson ?? null
+              log.metadataJson ?? null,
             );
           }
         });
-        
+
         insertMany(batch);
       } catch (error) {
-        console.error('[LogBuffer] Batch write failed:', error);
+        console.error("[LogBuffer] Batch write failed:", error);
         // 记录失败的日志数量
         console.error(`[LogBuffer] Lost ${batch.length} log entries`);
       }
@@ -455,7 +455,7 @@ export class Repository {
   constructor() {
     this.db = getDatabase().getDatabase();
     this.logBuffer = new LogBuffer(this.db);
-    
+
     this.prepareStatements();
   }
 
@@ -618,10 +618,9 @@ export class Repository {
         (SELECT COUNT(*) FROM executions WHERE status = 'running') as running_executions,
         (SELECT COUNT(*) FROM approvals WHERE status = 'pending') as pending_approvals,
         (SELECT AVG(duration_ms) FROM executions WHERE status = 'success' AND duration_ms IS NOT NULL) as avg_duration,
-        (SELECT CAST(
-          (SELECT COUNT(*) FROM executions WHERE status = 'failed') AS FLOAT
-        / NULLIF((SELECT COUNT(*) FROM executions WHERE status IN ('success', 'failed')), 0)
-        * 100 AS INTEGER)) as error_rate
+        (SELECT 
+          (SELECT COUNT(*) FROM executions WHERE status = 'failed') * 100.0
+        / NULLIF((SELECT COUNT(*) FROM executions WHERE status IN ('success', 'failed')), 0)) as error_rate
     `);
   }
 
@@ -634,7 +633,7 @@ export class Repository {
    */
   createJob(input: CronJobCreate): CronJob {
     const now = Date.now();
-    const id = generateId('job');
+    const id = generateId("job");
 
     const job: CronJob = {
       id,
@@ -704,7 +703,9 @@ export class Repository {
    * 获取任务
    */
   getJob(id: string): CronJob | null {
-    const row = this.getJobByIdStmt.get(id) as Record<string, unknown> | undefined;
+    const row = this.getJobByIdStmt.get(id) as
+      | Record<string, unknown>
+      | undefined;
     if (!row) return null;
     return this.rowToJob(row);
   }
@@ -714,10 +715,14 @@ export class Repository {
    */
   listJobs(includeInactive: boolean = false): CronJob[] {
     const rows = includeInactive
-      ? this.listJobsStmt.all() as Record<string, unknown>[]
-      : this.db.prepare('SELECT * FROM jobs WHERE is_active = 1 ORDER BY created_at DESC').all() as Record<string, unknown>[];
-    
-    return rows.map(row => this.rowToJob(row));
+      ? (this.listJobsStmt.all() as Record<string, unknown>[])
+      : (this.db
+          .prepare(
+            "SELECT * FROM jobs WHERE is_active = 1 ORDER BY created_at DESC",
+          )
+          .all() as Record<string, unknown>[]);
+
+    return rows.map((row) => this.rowToJob(row));
   }
 
   /**
@@ -725,7 +730,7 @@ export class Repository {
    */
   listEnabledJobs(): CronJob[] {
     const rows = this.listEnabledJobsStmt.all() as Record<string, unknown>[];
-    return rows.map(row => this.rowToJob(row));
+    return rows.map((row) => this.rowToJob(row));
   }
 
   /**
@@ -754,7 +759,9 @@ export class Repository {
       enabled: Boolean(row.enabled),
       schedule: JSON.parse(row.schedule_json as string) as CronSchedule,
       payload: JSON.parse(row.payload_json as string) as CronPayload,
-      options: row.options_json ? JSON.parse(row.options_json as string) as CronJobOptions : undefined,
+      options: row.options_json
+        ? (JSON.parse(row.options_json as string) as CronJobOptions)
+        : undefined,
       createdAtMs: row.created_at as number,
       updatedAtMs: row.updated_at as number,
       state: {
@@ -772,7 +779,7 @@ export class Repository {
    */
   createExecution(input: ExecutionCreate): Execution {
     const now = Date.now();
-    const id = generateId('exec');
+    const id = generateId("exec");
     const traceId = input.traceId ?? generateTraceId();
 
     this.db.transaction(() => {
@@ -789,7 +796,7 @@ export class Repository {
     return {
       id,
       jobId: input.jobId,
-      status: 'pending',
+      status: "pending",
       startedAt: null,
       finishedAt: null,
       lastHeartbeat: null,
@@ -809,7 +816,9 @@ export class Repository {
    * 获取执行记录
    */
   getExecution(id: string): Execution | null {
-    const row = this.getExecutionByIdStmt.get(id) as Record<string, unknown> | undefined;
+    const row = this.getExecutionByIdStmt.get(id) as
+      | Record<string, unknown>
+      | undefined;
     if (!row) return null;
     return this.rowToExecution(row);
   }
@@ -842,11 +851,13 @@ export class Repository {
     id: string,
     fromStatus: ExecutionStatus,
     toStatus: ExecutionStatus,
-    additionalUpdate?: Partial<ExecutionUpdate>
+    additionalUpdate?: Partial<ExecutionUpdate>,
   ): boolean {
     const now = Date.now();
-    
-    const result = this.db.prepare(`
+
+    const result = this.db
+      .prepare(
+        `
       UPDATE executions SET
         status = ?,
         started_at = COALESCE(?, started_at),
@@ -856,17 +867,19 @@ export class Repository {
         duration_ms = ?,
         updated_at = ?
       WHERE id = ? AND status = ?
-    `).run(
-      toStatus,
-      additionalUpdate?.startedAt ?? null,
-      additionalUpdate?.finishedAt ?? null,
-      additionalUpdate?.errorMessage ?? null,
-      additionalUpdate?.resultJson ?? null,
-      additionalUpdate?.durationMs ?? null,
-      now,
-      id,
-      fromStatus
-    );
+    `,
+      )
+      .run(
+        toStatus,
+        additionalUpdate?.startedAt ?? null,
+        additionalUpdate?.finishedAt ?? null,
+        additionalUpdate?.errorMessage ?? null,
+        additionalUpdate?.resultJson ?? null,
+        additionalUpdate?.durationMs ?? null,
+        now,
+        id,
+        fromStatus,
+      );
 
     return result.changes > 0;
   }
@@ -884,23 +897,31 @@ export class Repository {
    * 列出任务的历史执行记录
    */
   listExecutionsByJob(jobId: string, limit: number = 50): Execution[] {
-    const rows = this.listExecutionsByJobStmt.all(jobId, limit) as Record<string, unknown>[];
-    return rows.map(row => this.rowToExecution(row));
+    const rows = this.listExecutionsByJobStmt.all(jobId, limit) as Record<
+      string,
+      unknown
+    >[];
+    return rows.map((row) => this.rowToExecution(row));
   }
 
   /**
    * 获取正在运行的执行
    */
   getRunningExecutions(): Execution[] {
-    const rows = this.getRunningExecutionsStmt.all() as Record<string, unknown>[];
-    return rows.map(row => this.rowToExecution(row));
+    const rows = this.getRunningExecutionsStmt.all() as Record<
+      string,
+      unknown
+    >[];
+    return rows.map((row) => this.rowToExecution(row));
   }
 
   /**
    * 获取下一个待执行的任务
    */
   getNextDueExecution(): { execution: Execution; job: CronJob } | null {
-    const row = this.getNextDueExecutionStmt.get() as Record<string, unknown> | undefined;
+    const row = this.getNextDueExecutionStmt.get() as
+      | Record<string, unknown>
+      | undefined;
     if (!row) return null;
 
     return {
@@ -913,29 +934,38 @@ export class Repository {
    * 获取最近完成的执行
    */
   getRecentExecutions(limit: number = 10): Execution[] {
-    const rows = this.getRecentExecutionsStmt.all(limit) as Record<string, unknown>[];
-    return rows.map(row => this.rowToExecution(row));
+    const rows = this.getRecentExecutionsStmt.all(limit) as Record<
+      string,
+      unknown
+    >[];
+    return rows.map((row) => this.rowToExecution(row));
   }
 
   /**
    * 分页查询所有执行记录
-   * 
+   *
    * @param limit 每页数量，默认 20，最大 100
    * @param offset 偏移量，默认 0
    * @returns 执行记录列表、总数、是否有更多
    */
-  listExecutions(limit: number = 20, offset: number = 0): { items: Execution[]; total: number; hasMore: boolean } {
+  listExecutions(
+    limit: number = 20,
+    offset: number = 0,
+  ): { items: Execution[]; total: number; hasMore: boolean } {
     // 参数约束
     const safeLimit = Math.min(Math.max(1, limit), 100);
     const safeOffset = Math.max(0, offset);
 
-    const rows = this.listExecutionsStmt.all(safeLimit, safeOffset) as Record<string, unknown>[];
+    const rows = this.listExecutionsStmt.all(safeLimit, safeOffset) as Record<
+      string,
+      unknown
+    >[];
     const totalRow = this.getTotalExecutionsStmt.get() as { count: number };
     const total = totalRow.count;
     const hasMore = safeOffset + rows.length < total;
 
     return {
-      items: rows.map(row => this.rowToExecution(row)),
+      items: rows.map((row) => this.rowToExecution(row)),
       total,
       hasMore,
     };
@@ -954,13 +984,17 @@ export class Repository {
    */
   getStaleExecutions(timeoutMs: number = 300000): Execution[] {
     const cutoff = Date.now() - timeoutMs;
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT * FROM executions 
       WHERE status = 'running' 
       AND (last_heartbeat IS NULL AND started_at < ? OR last_heartbeat < ?)
-    `).all(cutoff, cutoff) as Record<string, unknown>[];
-    
-    return rows.map(row => this.rowToExecution(row));
+    `,
+      )
+      .all(cutoff, cutoff) as Record<string, unknown>[];
+
+    return rows.map((row) => this.rowToExecution(row));
   }
 
   /**
@@ -997,13 +1031,13 @@ export class Repository {
     executionId: string,
     level: LogLevel,
     content: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
   ): void {
     this.logBuffer.append(
       executionId,
       level,
       content,
-      metadata ? JSON.stringify(metadata) : undefined
+      metadata ? JSON.stringify(metadata) : undefined,
     );
   }
 
@@ -1027,15 +1061,19 @@ export class Repository {
   getLogsByExecution(
     executionId: string,
     limit: number = 100,
-    offset: number = 0
+    offset: number = 0,
   ): PaginatedResult<LogEntry> {
     const countRow = this.getLogCountStmt.get(executionId) as { count: number };
     const total = countRow.count;
-    
-    const rows = this.getLogsByExecutionStmt.all(executionId, limit, offset) as Record<string, unknown>[];
-    
+
+    const rows = this.getLogsByExecutionStmt.all(
+      executionId,
+      limit,
+      offset,
+    ) as Record<string, unknown>[];
+
     return {
-      items: rows.map(row => ({
+      items: rows.map((row) => ({
         id: row.id as number,
         executionId: row.execution_id as string,
         timestamp: row.timestamp as number,
@@ -1046,7 +1084,8 @@ export class Repository {
       })),
       total,
       hasMore: offset + rows.length < total,
-      cursor: rows.length > 0 ? (rows[rows.length - 1].id as number) : undefined,
+      cursor:
+        rows.length > 0 ? (rows[rows.length - 1].id as number) : undefined,
     };
   }
 
@@ -1073,7 +1112,7 @@ export class Repository {
    */
   createApproval(input: ApprovalCreate): Approval {
     const now = Date.now();
-    const id = generateId('apr');
+    const id = generateId("apr");
 
     this.db.transaction(() => {
       this.insertApprovalStmt.run({
@@ -1089,7 +1128,7 @@ export class Repository {
     return {
       id,
       executionId: input.executionId,
-      status: 'pending',
+      status: "pending",
       requestMessage: input.requestMessage ?? null,
       requestContextJson: input.requestContextJson ?? null,
       note: null,
@@ -1104,7 +1143,9 @@ export class Repository {
    * 获取执行的审批记录
    */
   getApprovalByExecution(executionId: string): Approval | null {
-    const row = this.getApprovalByExecutionStmt.get(executionId) as Record<string, unknown> | undefined;
+    const row = this.getApprovalByExecutionStmt.get(executionId) as
+      | Record<string, unknown>
+      | undefined;
     if (!row) return null;
     return this.rowToApproval(row);
   }
@@ -1112,14 +1153,18 @@ export class Repository {
   /**
    * 批准执行
    */
-  approveExecution(executionId: string, note?: string, resolvedBy?: string): { approval: Approval; execution: Execution } | null {
+  approveExecution(
+    executionId: string,
+    note?: string,
+    resolvedBy?: string,
+  ): { approval: Approval; execution: Execution } | null {
     const approval = this.getApprovalByExecution(executionId);
-    if (!approval || approval.status !== 'pending') return null;
+    if (!approval || approval.status !== "pending") return null;
 
     const now = Date.now();
     const updatedApproval: Approval = {
       ...approval,
-      status: 'approved',
+      status: "approved",
       note: note ?? null,
       resolvedBy: resolvedBy ?? null,
       resolvedAt: now,
@@ -1129,7 +1174,7 @@ export class Repository {
     this.db.transaction(() => {
       this.updateApprovalStatusStmt.run({
         id: approval.id,
-        status: 'approved',
+        status: "approved",
         note: note ?? null,
         resolvedBy: resolvedBy ?? null,
         resolvedAt: now,
@@ -1137,9 +1182,13 @@ export class Repository {
       });
 
       // 将执行状态从 waiting_for_approval 改为 pending（待恢复执行）
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE executions SET status = 'pending', updated_at = ? WHERE id = ? AND status = 'waiting_for_approval'
-      `).run(now, executionId);
+      `,
+        )
+        .run(now, executionId);
     })();
 
     const execution = this.getExecution(executionId);
@@ -1151,14 +1200,18 @@ export class Repository {
   /**
    * 拒绝执行
    */
-  rejectExecution(executionId: string, reason?: string, resolvedBy?: string): { approval: Approval; execution: Execution } | null {
+  rejectExecution(
+    executionId: string,
+    reason?: string,
+    resolvedBy?: string,
+  ): { approval: Approval; execution: Execution } | null {
     const approval = this.getApprovalByExecution(executionId);
-    if (!approval || approval.status !== 'pending') return null;
+    if (!approval || approval.status !== "pending") return null;
 
     const now = Date.now();
     const updatedApproval: Approval = {
       ...approval,
-      status: 'rejected',
+      status: "rejected",
       note: reason ?? null,
       resolvedBy: resolvedBy ?? null,
       resolvedAt: now,
@@ -1168,7 +1221,7 @@ export class Repository {
     this.db.transaction(() => {
       this.updateApprovalStatusStmt.run({
         id: approval.id,
-        status: 'rejected',
+        status: "rejected",
         note: reason ?? null,
         resolvedBy: resolvedBy ?? null,
         resolvedAt: now,
@@ -1176,9 +1229,13 @@ export class Repository {
       });
 
       // 将执行状态改为 failed
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE executions SET status = 'failed', error_message = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = 'waiting_for_approval'
-      `).run(reason ?? 'Rejected by user', now, now, executionId);
+      `,
+        )
+        .run(reason ?? "Rejected by user", now, now, executionId);
     })();
 
     const execution = this.getExecution(executionId);
@@ -1191,8 +1248,11 @@ export class Repository {
    * 列出待审批的请求
    */
   listPendingApprovals(): Array<Approval & { jobId: string; jobName: string }> {
-    const rows = this.listPendingApprovalsStmt.all() as Record<string, unknown>[];
-    return rows.map(row => ({
+    const rows = this.listPendingApprovalsStmt.all() as Record<
+      string,
+      unknown
+    >[];
+    return rows.map((row) => ({
       ...this.rowToApproval(row),
       jobId: row.job_id as string,
       jobName: row.job_name as string,
@@ -1227,9 +1287,12 @@ export class Repository {
   getSystemStats(): SystemStats {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-    
-    const row = this.getStatsStmt.get(startOfDay.getTime()) as Record<string, unknown>;
-    
+
+    const row = this.getStatsStmt.get(startOfDay.getTime()) as Record<
+      string,
+      unknown
+    >;
+
     return {
       totalJobs: row.total_jobs as number,
       activeJobs: row.active_jobs as number,
@@ -1246,10 +1309,14 @@ export class Repository {
    * 获取下一个唤醒时间
    */
   getNextWakeTime(): number | null {
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(
+        `
       SELECT MIN(next_run_at) as next_wake FROM jobs WHERE enabled = 1 AND is_active = 1 AND next_run_at IS NOT NULL
-    `).get() as { next_wake: number | null };
-    
+    `,
+      )
+      .get() as { next_wake: number | null };
+
     return row.next_wake;
   }
 

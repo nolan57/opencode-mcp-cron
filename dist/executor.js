@@ -10,16 +10,17 @@
  *
  * @module executor
  */
-import { spawn } from 'child_process';
-import { getRepository } from './repository.js';
-import { generateTraceId } from './database.js';
-import { computeNextRunAtMs, } from './schedule.js';
-import { getErrorBackoffMs } from './types.js';
+import { spawn, exec } from "child_process";
+import { promisify } from "util";
+import { getRepository } from "./repository.js";
+import { generateTraceId } from "./database.js";
+import { computeNextRunAtMs } from "./schedule.js";
+import { getErrorBackoffMs } from "./types.js";
 // ============================================================================
 // 配置常量
 // ============================================================================
 /** OpenCode 命令 */
-const OPENCODE_COMMAND = process.env.OPENCODE_COMMAND || 'opencode';
+const OPENCODE_COMMAND = process.env.OPENCODE_COMMAND || "opencode";
 /** 默认软超时时间（5分钟）- 用于友好提示 */
 const DEFAULT_SOFT_TIMEOUT_MS = 5 * 60 * 1000;
 /** 默认硬超时时间（1小时）- 强制杀死进程 */
@@ -34,6 +35,8 @@ const MAX_OUTPUT_LENGTH = 10000;
 const MAX_ERROR_LENGTH = 2000;
 /** SIGKILL 前等待 SIGTERM 的宽限时间 */
 const GRACEFUL_SHUTDOWN_MS = 5000;
+/** Shell 执行助手 */
+const execAsync = promisify(exec);
 // 活跃的执行上下文
 const activeExecutions = new Map();
 // ============================================================================
@@ -51,9 +54,7 @@ export async function executeJob(job, executionId) {
     const startTime = Date.now();
     const traceId = generateTraceId();
     // 创建或获取执行记录
-    let execution = executionId
-        ? repo.getExecution(executionId)
-        : null;
+    let execution = executionId ? repo.getExecution(executionId) : null;
     if (!execution) {
         execution = repo.createExecution({
             jobId: job.id,
@@ -63,13 +64,13 @@ export async function executeJob(job, executionId) {
     const execId = execution.id;
     console.error(`[Executor] Starting execution: ${execId} for job: ${job.name} (${job.id})`);
     // 更新状态为 running
-    repo.transitionExecutionStatus(execId, 'pending', 'running', {
+    repo.transitionExecutionStatus(execId, "pending", "running", {
         startedAt: startTime,
     });
     // 计算超时时间（从 job.config 或 job.options 获取，默认 1 小时）
-    const hardTimeoutMs = job.config?.maxDurationMs
-        ?? job.options?.timeoutMs
-        ?? DEFAULT_HARD_TIMEOUT_MS;
+    const hardTimeoutMs = job.config?.maxDurationMs ??
+        job.options?.timeoutMs ??
+        DEFAULT_HARD_TIMEOUT_MS;
     // 创建执行上下文
     const ctx = {
         executionId: execId,
@@ -87,25 +88,25 @@ export async function executeJob(job, executionId) {
     };
     activeExecutions.set(execId, ctx);
     // 记录超时配置日志
-    repo.appendLog(execId, 'info', `Hard timeout set to ${hardTimeoutMs / 1000}s (${hardTimeoutMs / 60000}min)`);
+    repo.appendLog(execId, "info", `Hard timeout set to ${hardTimeoutMs / 1000}s (${hardTimeoutMs / 60000}min)`);
     try {
         // 根据负载类型执行
         let result;
-        if (job.payload.kind === 'systemEvent') {
+        if (job.payload.kind === "systemEvent") {
             result = await executeSystemEvent(ctx, job);
         }
-        else if (job.payload.kind === 'agentTurn') {
+        else if (job.payload.kind === "agentTurn") {
             result = await executeAgentTurn(ctx, job, hardTimeoutMs);
         }
         else {
             result = {
-                status: 'failed',
+                status: "failed",
                 error: `Unknown payload kind: ${job.payload.kind}`,
                 durationMs: Date.now() - startTime,
             };
         }
         // 记录执行日志
-        repo.appendLog(execId, 'info', `Execution completed with status: ${result.status}`);
+        repo.appendLog(execId, "info", `Execution completed with status: ${result.status}`);
         // 刷新日志缓冲区
         repo.flushLogs();
         // 更新执行记录
@@ -115,8 +116,10 @@ export async function executeJob(job, executionId) {
             finishedAt: now,
             errorStack: result.errorStack,
             errorMessage: result.error,
-            resultJson: result.output ? JSON.stringify({ output: result.output }) : null,
-            durationMs: result.durationMs ?? (now - startTime),
+            resultJson: result.output
+                ? JSON.stringify({ output: result.output })
+                : null,
+            durationMs: result.durationMs ?? now - startTime,
         });
         return result;
     }
@@ -125,18 +128,18 @@ export async function executeJob(job, executionId) {
         const errorStack = error instanceof Error ? error.stack : undefined;
         console.error(`[Executor] Execution ${execId} failed:`, errorMsg);
         // 记录错误日志
-        repo.appendLog(execId, 'error', `Execution failed: ${errorMsg}`);
+        repo.appendLog(execId, "error", `Execution failed: ${errorMsg}`);
         repo.flushLogs();
         // 更新执行记录
         repo.updateExecutionStatus(execId, {
-            status: 'failed',
+            status: "failed",
             finishedAt: Date.now(),
             errorMessage: errorMsg.substring(0, MAX_ERROR_LENGTH),
             errorStack,
             durationMs: Date.now() - startTime,
         });
         return {
-            status: 'failed',
+            status: "failed",
             error: errorMsg,
             errorStack,
             durationMs: Date.now() - startTime,
@@ -163,12 +166,12 @@ async function executeAgentTurn(ctx, job, hardTimeoutMs) {
     const startTime = ctx.startTime;
     const message = job.payload.message;
     // 记录开始日志
-    repo.appendLog(ctx.executionId, 'info', `Starting agent turn with message: ${message.substring(0, 100)}...`);
+    repo.appendLog(ctx.executionId, "info", `Starting agent turn with message: ${message.substring(0, 100)}...`);
     return new Promise((resolve) => {
-        const args = ['run', message];
+        const args = ["run", message];
         // 启动子进程
         const proc = spawn(OPENCODE_COMMAND, args, {
-            stdio: ['pipe', 'pipe', 'pipe'],
+            stdio: ["pipe", "pipe", "pipe"],
             env: {
                 ...process.env,
                 // 传递执行上下文
@@ -190,15 +193,15 @@ async function executeAgentTurn(ctx, job, hardTimeoutMs) {
         }, hardTimeoutMs);
         // 记录硬超时设置
         console.error(`[Executor] ${ctx.executionId}: Hard timeout timer set for ${hardTimeoutMs / 1000}s`);
-        let stdout = '';
-        let stderr = '';
+        let stdout = "";
+        let stderr = "";
         let lastFlushTime = Date.now();
         // 处理标准输出（流式日志）
-        proc.stdout?.on('data', (data) => {
+        proc.stdout?.on("data", (data) => {
             const chunk = data.toString();
             stdout += chunk;
             // 流式写入日志
-            appendStreamLog(ctx, 'stream', chunk);
+            appendStreamLog(ctx, "stream", chunk);
             // 定期刷新日志缓冲
             if (Date.now() - lastFlushTime > LOG_FLUSH_INTERVAL_MS) {
                 repo.flushLogs();
@@ -206,16 +209,16 @@ async function executeAgentTurn(ctx, job, hardTimeoutMs) {
             }
         });
         // 处理标准错误
-        proc.stderr?.on('data', (data) => {
+        proc.stderr?.on("data", (data) => {
             const chunk = data.toString();
             stderr += chunk;
             // 错误日志
-            appendStreamLog(ctx, 'error', chunk);
+            appendStreamLog(ctx, "error", chunk);
         });
         // ============================================================
         // 进程正常结束处理
         // ============================================================
-        proc.on('close', (code) => {
+        proc.on("close", (code) => {
             // 如果已被硬超时处理，则跳过
             if (ctx.isCompleted) {
                 console.error(`[Executor] ${ctx.executionId}: close event received but already completed (hardKilled=${ctx.isHardKilled})`);
@@ -230,18 +233,18 @@ async function executeAgentTurn(ctx, job, hardTimeoutMs) {
                 console.error(`[Executor] ${ctx.executionId}: Hard timeout timer cleared on normal exit`);
             }
             // 最终刷新日志
-            repo.appendLog(ctx.executionId, 'info', `Process exited with code: ${code}`);
+            repo.appendLog(ctx.executionId, "info", `Process exited with code: ${code}`);
             repo.flushLogs();
             if (code === 0) {
                 resolve({
-                    status: 'success',
+                    status: "success",
                     output: truncateOutput(stdout),
                     durationMs,
                 });
             }
             else {
                 resolve({
-                    status: 'failed',
+                    status: "failed",
                     error: truncateError(stderr) || `Process exited with code: ${code}`,
                     output: truncateOutput(stdout + stderr),
                     durationMs,
@@ -249,7 +252,7 @@ async function executeAgentTurn(ctx, job, hardTimeoutMs) {
             }
         });
         // 进程错误处理
-        proc.on('error', (err) => {
+        proc.on("error", (err) => {
             if (ctx.isCompleted)
                 return;
             ctx.isCompleted = true;
@@ -258,10 +261,10 @@ async function executeAgentTurn(ctx, job, hardTimeoutMs) {
                 clearTimeout(ctx.hardTimeoutTimer);
                 ctx.hardTimeoutTimer = null;
             }
-            repo.appendLog(ctx.executionId, 'error', `Process error: ${err.message}`);
+            repo.appendLog(ctx.executionId, "error", `Process error: ${err.message}`);
             repo.flushLogs();
             resolve({
-                status: 'failed',
+                status: "failed",
                 error: err.message,
                 durationMs: Date.now() - startTime,
             });
@@ -273,16 +276,56 @@ async function executeAgentTurn(ctx, job, hardTimeoutMs) {
 // ============================================================================
 /**
  * 执行系统事件
+ * 真正执行 Shell 命令，而不是只记录日志
  */
 async function executeSystemEvent(ctx, job) {
     const repo = getRepository();
-    repo.appendLog(ctx.executionId, 'info', `System event: ${job.payload.message}`);
+    const startTime = Date.now();
+    // 1. 获取命令内容
+    const command = typeof job.payload.message === "string"
+        ? job.payload.message
+        : JSON.stringify(job.payload);
+    repo.appendLog(ctx.executionId, "info", `Starting system event command: ${command}`);
     repo.flushLogs();
-    return {
-        status: 'success',
-        output: job.payload.message,
-        durationMs: 0,
-    };
+    try {
+        // 2. 执行命令
+        const { stdout, stderr } = await execAsync(command, {
+            timeout: job.config?.maxDurationMs ?? DEFAULT_HARD_TIMEOUT_MS,
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        });
+        const durationMs = Date.now() - startTime;
+        // 3. 记录输出
+        if (stdout) {
+            repo.appendLog(ctx.executionId, "stream", stdout);
+        }
+        if (stderr) {
+            // 有些命令会把信息输出到 stderr 但不代表失败，这里先记录
+            repo.appendLog(ctx.executionId, "warn", stderr);
+        }
+        repo.flushLogs();
+        return {
+            status: "success",
+            output: stdout || "Command executed successfully (no output)",
+            durationMs,
+        };
+    }
+    catch (error) {
+        const durationMs = Date.now() - startTime;
+        const errorMsg = error.message || "Unknown system event error";
+        repo.appendLog(ctx.executionId, "error", `System event failed: ${errorMsg}`);
+        if (error.stdout)
+            repo.appendLog(ctx.executionId, "stream", error.stdout);
+        if (error.stderr)
+            repo.appendLog(ctx.executionId, "error", error.stderr);
+        repo.flushLogs();
+        return {
+            status: "failed",
+            error: errorMsg,
+            output: error.stdout || "",
+            durationMs,
+        };
+    }
 }
 // ============================================================================
 // 鲁棒性心跳（递归 setTimeout 模式）
@@ -359,13 +402,13 @@ function handleHardTimeout(ctx, resolve, timeoutMs) {
     ctx.isCompleted = true;
     ctx.isHardKilled = true;
     const repo = getRepository();
-    repo.appendLog(ctx.executionId, 'error', `HARD TIMEOUT: Process killed after ${timeoutMs / 1000}s (SIGKILL)`);
+    repo.appendLog(ctx.executionId, "error", `HARD TIMEOUT: Process killed after ${timeoutMs / 1000}s (SIGKILL)`);
     repo.flushLogs();
     // 强制杀死进程
     if (ctx.process) {
         try {
             // 直接使用 SIGKILL，不等待优雅退出
-            ctx.process.kill('SIGKILL');
+            ctx.process.kill("SIGKILL");
             console.error(`[Executor] ${ctx.executionId}: Process killed with SIGKILL`);
         }
         catch (error) {
@@ -375,7 +418,7 @@ function handleHardTimeout(ctx, resolve, timeoutMs) {
     }
     // 立即返回结果（不等待 close 事件）
     resolve({
-        status: 'failed',
+        status: "failed",
         error: `Execution hard timeout after ${timeoutMs / 1000}s (process killed with SIGKILL)`,
         durationMs: Date.now() - ctx.startTime,
     });
@@ -402,7 +445,7 @@ function cleanupExecutionContext(ctx) {
     // 确保进程已终止
     if (ctx.process && !ctx.isCompleted) {
         try {
-            ctx.process.kill('SIGTERM');
+            ctx.process.kill("SIGTERM");
         }
         catch {
             // 忽略错误
@@ -415,7 +458,7 @@ function cleanupExecutionContext(ctx) {
 function appendStreamLog(ctx, level, content) {
     const repo = getRepository();
     // 分行处理
-    const lines = content.split('\n');
+    const lines = content.split("\n");
     for (const line of lines) {
         if (line.trim()) {
             repo.appendLog(ctx.executionId, level, line);
@@ -429,7 +472,7 @@ function truncateOutput(output) {
     if (output.length <= MAX_OUTPUT_LENGTH) {
         return output;
     }
-    return output.substring(0, MAX_OUTPUT_LENGTH) + '\n... [truncated]';
+    return output.substring(0, MAX_OUTPUT_LENGTH) + "\n... [truncated]";
 }
 /**
  * 截断错误信息
@@ -438,7 +481,7 @@ function truncateError(error) {
     if (error.length <= MAX_ERROR_LENGTH) {
         return error;
     }
-    return error.substring(0, MAX_ERROR_LENGTH) + '... [truncated]';
+    return error.substring(0, MAX_ERROR_LENGTH) + "... [truncated]";
 }
 // ============================================================================
 // 结果应用（兼容旧版）
@@ -452,15 +495,16 @@ export function applyJobResult(job, result, nowMs) {
         state: { ...job.state },
     };
     // 统一处理状态
-    const isSuccess = result.status === 'ok' || result.status === 'success';
-    const isError = result.status === 'error' || result.status === 'failed';
+    const isSuccess = result.status === "ok" || result.status === "success";
+    const isError = result.status === "error" || result.status === "failed";
     updates.state.runningAtMs = undefined;
     updates.state.lastRunAtMs = nowMs;
-    updates.state.lastStatus = isSuccess ? 'ok' : isError ? 'error' : 'skipped';
+    updates.state.lastStatus = isSuccess ? "ok" : isError ? "error" : "skipped";
     updates.state.lastDurationMs = result.durationMs;
     updates.state.lastError = result.error;
     if (isError) {
-        updates.state.consecutiveErrors = (updates.state.consecutiveErrors || 0) + 1;
+        updates.state.consecutiveErrors =
+            (updates.state.consecutiveErrors || 0) + 1;
     }
     else {
         updates.state.consecutiveErrors = 0;
@@ -470,7 +514,7 @@ export function applyJobResult(job, result, nowMs) {
         return { shouldDelete: true, updates };
     }
     // 计算下次执行时间
-    if (job.schedule.kind === 'at') {
+    if (job.schedule.kind === "at") {
         // 一次性任务
         updates.enabled = false;
         updates.state.nextRunAtMs = undefined;
@@ -508,9 +552,9 @@ export function detectStaleExecutions(timeoutMs = 5 * 60 * 1000) {
     let markedCount = 0;
     for (const exec of staleExecutions) {
         console.warn(`[Executor] Marking stale execution as failed: ${exec.id}`);
-        repo.appendLog(exec.id, 'error', `Execution marked as failed due to stale heartbeat (no heartbeat for ${timeoutMs / 1000}s)`);
+        repo.appendLog(exec.id, "error", `Execution marked as failed due to stale heartbeat (no heartbeat for ${timeoutMs / 1000}s)`);
         repo.flushLogs();
-        const updated = repo.transitionExecutionStatus(exec.id, 'running', 'failed', {
+        const updated = repo.transitionExecutionStatus(exec.id, "running", "failed", {
             finishedAt: Date.now(),
             errorMessage: `Execution timed out (no heartbeat for ${timeoutMs / 1000}s)`,
         });
@@ -533,23 +577,23 @@ export function cancelExecution(executionId, reason) {
     }
     console.error(`[Executor] Cancelling execution: ${executionId}`);
     const repo = getRepository();
-    repo.appendLog(executionId, 'warn', `Execution cancelled: ${reason ?? 'No reason provided'}`);
+    repo.appendLog(executionId, "warn", `Execution cancelled: ${reason ?? "No reason provided"}`);
     repo.flushLogs();
     // 标记为完成
     ctx.isCompleted = true;
     // 终止进程
     if (ctx.process) {
         try {
-            ctx.process.kill('SIGTERM');
+            ctx.process.kill("SIGTERM");
         }
         catch {
             // 忽略错误
         }
     }
     // 更新状态
-    repo.transitionExecutionStatus(executionId, 'running', 'cancelled', {
+    repo.transitionExecutionStatus(executionId, "running", "cancelled", {
         finishedAt: Date.now(),
-        errorMessage: reason ?? 'Cancelled by user',
+        errorMessage: reason ?? "Cancelled by user",
     });
     return true;
 }
@@ -562,10 +606,10 @@ export function pauseExecution(executionId, reason) {
         return false;
     }
     const repo = getRepository();
-    repo.appendLog(executionId, 'info', `Execution paused: ${reason ?? 'No reason provided'}`);
+    repo.appendLog(executionId, "info", `Execution paused: ${reason ?? "No reason provided"}`);
     repo.flushLogs();
     // 更新状态为 paused
-    return repo.transitionExecutionStatus(executionId, 'running', 'paused', {});
+    return repo.transitionExecutionStatus(executionId, "running", "paused", {});
 }
 /**
  * 恢复执行
@@ -573,12 +617,12 @@ export function pauseExecution(executionId, reason) {
 export function resumeExecution(executionId) {
     const repo = getRepository();
     const execution = repo.getExecution(executionId);
-    if (!execution || execution.status !== 'paused') {
+    if (!execution || execution.status !== "paused") {
         return false;
     }
-    repo.appendLog(executionId, 'info', 'Execution resumed');
+    repo.appendLog(executionId, "info", "Execution resumed");
     repo.flushLogs();
-    return repo.transitionExecutionStatus(executionId, 'paused', 'pending', {});
+    return repo.transitionExecutionStatus(executionId, "paused", "pending", {});
 }
 /**
  * 获取活跃执行数量
@@ -596,9 +640,9 @@ export function getActiveExecutionIds() {
  * 关闭所有执行
  */
 export function shutdownAll() {
-    console.error('[Executor] Shutting down all executions...');
+    console.error("[Executor] Shutting down all executions...");
     for (const [id, ctx] of activeExecutions) {
-        cancelExecution(id, 'Server shutdown');
+        cancelExecution(id, "Server shutdown");
     }
     // 最终刷新日志
     const repo = getRepository();
