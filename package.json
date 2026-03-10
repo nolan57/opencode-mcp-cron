@@ -10,11 +10,13 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
+    "better-sqlite3": "^11.7.0",
     "croner": "^10.0.1",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.0"
   }
